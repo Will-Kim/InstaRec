@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:volume_controller/volume_controller.dart';
 
+@pragma('vm:entry-point')
 class BackgroundService {
   
   // Volume button listeners
@@ -108,12 +109,12 @@ class BackgroundService {
     startVolumeButtonListeners();
 
     // Keep service running
-    Timer.periodic(const Duration(seconds: 1), (timer) async {
+    Timer.periodic(const Duration(seconds: 5), (timer) async {
       if (service is AndroidServiceInstance) {
         if (await service.isForegroundService()) {
           service.setForegroundNotificationInfo(
             title: "InstaRec",
-            content: "백그라운드에서 녹음 중... ${DateTime.now()}",
+            content: "백그라운드에서 녹음 중... ${DateTime.now().toString().substring(11, 19)}",
           );
         }
       }

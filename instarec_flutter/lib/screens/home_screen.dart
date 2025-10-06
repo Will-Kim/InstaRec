@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/recording_state.dart';
 import '../services/audio_service.dart';
-import '../services/background_service.dart';
+import '../services/foreground_service.dart';
 import '../widgets/recording_indicator.dart';
 import '../widgets/buffer_settings.dart';
 import '../widgets/saved_files_list.dart';
@@ -55,17 +55,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       // Load saved settings
       await _loadSettings();
 
-      // Start background service
-      await BackgroundService.startService();
+      // Initialize and start foreground service
+      await ForegroundService.initializeService();
+      final result = await ForegroundService.startService();
+      if (kDebugMode) {
+        print('Foreground service start result: $result');
+      }
 
       // Set up volume button callbacks
-      BackgroundService.setVolumeButtonCallbacks(
+      ForegroundService.setVolumeButtonCallbacks(
         onVolumeUp: _saveCapture,
         onVolumeDown: _saveCapture,
       );
-
-      // 앱 시작 시 자동으로 녹음 시작
-      await _startRecording();
 
       setState(() {
         _isInitialized = true;
@@ -187,7 +188,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void dispose() {
     _recordingAnimationController.dispose();
     _audioService?.dispose();
-    BackgroundService.dispose();
+    ForegroundService.dispose();
     super.dispose();
   }
 

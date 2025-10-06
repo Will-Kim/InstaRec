@@ -47,7 +47,7 @@ dependencies:
   permission_handler: ^11.2.0
   
   # Background services
-  flutter_background_service: ^5.0.5
+  flutter_foreground_task: ^9.1.0
   
   # Volume button detection
   volume_controller: ^2.0.6

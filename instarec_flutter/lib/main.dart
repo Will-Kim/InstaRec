@@ -2,17 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'services/audio_service.dart';
-import 'services/background_service.dart';
+import 'services/foreground_service.dart';
 import 'models/recording_state.dart';
 import 'screens/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Initialize background service
-  await initializeService();
+  // Initialize foreground service
+  await ForegroundService.initializeService();
   
   // Request permissions
   await _requestPermissions();
