@@ -5,9 +5,6 @@ import 'package:flutter_sound/flutter_sound.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:share_plus/share_plus.dart';
-// FFmpeg removed due to iOS compatibility issues
-// import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
-// import 'package:ffmpeg_kit_flutter/return_code.dart';
 
 // Circular Buffer for audio data
 class CircularBuffer {
@@ -19,7 +16,7 @@ class CircularBuffer {
   final int _bytesPerSample = 2; // 16-bit = 2 bytes
   
   CircularBuffer(int maxDurationSeconds) 
-    : _buffer = Uint8List(maxDurationSeconds * 44100 * 2); // 30MB for 300 seconds
+    : _buffer = Uint8List(maxDurationSeconds * 44100 * 2);
   
   // Write audio data to buffer
   void write(Uint8List data) {
@@ -34,7 +31,7 @@ class CircularBuffer {
     }
   }
   
-  // Read N seconds of audio data (최근 N초를 역순으로 읽기)
+  // Read N seconds of audio data (최근 N초)
   Uint8List readSeconds(int seconds) {
     final bytesToRead = seconds * _sampleRate * _bytesPerSample;
     
@@ -76,7 +73,9 @@ class CircularBuffer {
       'readPos': _readPos,
       'isFull': _isFull,
       'bufferSize': _buffer.length,
-      'availableSeconds': _isFull ? _buffer.length ~/ (_sampleRate * _bytesPerSample) : _writePos ~/ (_sampleRate * _bytesPerSample),
+      'availableSeconds': _isFull 
+          ? _buffer.length ~/ (_sampleRate * _bytesPerSample) 
+          : _writePos ~/ (_sampleRate * _bytesPerSample),
     };
   }
 }
@@ -86,27 +85,23 @@ class AudioService {
   Timer? _recordingTimer;
   String? _currentRecordingPath;
 
-  int _lastReadFileSize = 0; // 마지막으로 읽은 파일 크기
-  static const int _wavHeaderSize = 44; // WAV 헤더 크기
+  int _lastReadFileSize = 0;
+  static const int _wavHeaderSize = 44;
   
   // Callback for state updates
   Function()? _onStateChanged;
   
-  // Buffer duration setting
-  int _bufferDuration = 10; // 초 단위 (테스트용)
+  // Buffer duration setting (default)
+  int _bufferDuration = 10;
   
   // Circular buffer system
   CircularBuffer? _circularBuffer;
 
   // Recording state
   bool _isRecording = false;
-  bool _isCapturing = false;
-  String? _captureStartTime;
 
   // Getters
   bool get isRecording => _isRecording;
-  bool get isCapturing => _isCapturing;
-  String? get captureStartTime => _captureStartTime;
   int get bufferDuration => _bufferDuration;
 
   // Initialize audio service
@@ -116,15 +111,12 @@ class AudioService {
       throw Exception('오디오 인코더를 지원하지 않습니다');
     }
     
-    
-    // Set state change callback
     _onStateChanged = onStateChanged;
   }
 
   // Get accessible storage directory for saving files
   Future<Directory> _getAccessibleDirectory() async {
     if (Platform.isIOS) {
-      // iOS: Use Documents directory that's accessible via Files app
       final directory = await getApplicationDocumentsDirectory();
       final recordingsDir = Directory(path.join(directory.path, 'recordings'));
       if (!await recordingsDir.exists()) {
@@ -132,7 +124,6 @@ class AudioService {
       }
       return recordingsDir;
     } else {
-      // Android: Use external storage
       final directory = await getExternalStorageDirectory();
       final recordingsDir = Directory(path.join(directory!.path, 'InstaRec', 'recordings'));
       if (!await recordingsDir.exists()) {
@@ -145,7 +136,6 @@ class AudioService {
   // Get playable directory for audio playback
   Future<Directory> _getPlayableDirectory() async {
     if (Platform.isIOS) {
-      // iOS: Use temporary directory for playback
       final directory = await getTemporaryDirectory();
       final playableDir = Directory(path.join(directory.path, 'playable_recordings'));
       if (!await playableDir.exists()) {
@@ -153,7 +143,6 @@ class AudioService {
       }
       return playableDir;
     } else {
-      // Android: Use the same accessible directory
       return await _getAccessibleDirectory();
     }
   }
@@ -161,7 +150,7 @@ class AudioService {
   // Copy file to playable location
   Future<String> copyToPlayableLocation(String originalPath) async {
     if (Platform.isAndroid) {
-      return originalPath; // Android doesn't need copying
+      return originalPath;
     }
     
     final playableDir = await _getPlayableDirectory();
@@ -176,18 +165,22 @@ class AudioService {
     return playablePath;
   }
 
-  // Start continuous recording
+  // Start continuous recording with circular buffer
   Future<void> startContinuousRecording() async {
     if (_isRecording) return;
 
     try {
+      // 기존 타이머 정리
+      _recordingTimer?.cancel();
+      _recordingTimer = null;
+      _lastReadFileSize = 0;
+
       final recordingsDir = await _getAccessibleDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       _currentRecordingPath = path.join(
         recordingsDir.path,
         'continuous_recording_$timestamp.wav'
       );
-
 
       // Start recording
       await _audioRecorder.startRecorder(
@@ -197,13 +190,18 @@ class AudioService {
       );
 
       _isRecording = true;
-      _onStateChanged?.call();
-
+      
+      // Initialize circular buffer immediately
+      _circularBuffer = CircularBuffer(300); // 300초 (5분) 버퍼
+      
       // Start real-time audio streaming to circular buffer
       _startRealTimeAudioStreaming();
 
+      _onStateChanged?.call();
+
       if (kDebugMode) {
         print('🎤 연속 녹음 시작: $_currentRecordingPath');
+        print('📦 Circular Buffer 생성 완료 (300초 용량)');
       }
     } catch (e) {
       if (kDebugMode) {
@@ -213,15 +211,23 @@ class AudioService {
     }
   }
 
-  // Stop continuous recording
+  // Stop continuous recording (저장 없이 중지만)
   Future<void> stopContinuousRecording() async {
     if (!_isRecording) return;
 
     try {
       await _audioRecorder.stopRecorder();
       _recordingTimer?.cancel();
+      _recordingTimer = null;
+      
       _isRecording = false;
+      _lastReadFileSize = 0;
+      
+      // Circular buffer는 유지 (메모리 정리를 원하면 null 처리)
+      // _circularBuffer = null;
+      
       _onStateChanged?.call();
+      
       if (kDebugMode) {
         print('🛑 연속 녹음 중지');
       }
@@ -233,59 +239,48 @@ class AudioService {
     }
   }
 
-  // Start capture (save buffer + new recording)
-  Future<void> startCapture() async {
-    if (_isCapturing) return;
-
-    _isCapturing = true;
-    _captureStartTime = DateTime.now().toIso8601String();
-
-    // _lastReadFileSize 업데이트
-    if (_currentRecordingPath != null) {
-      final file = File(_currentRecordingPath!);
-      if (file.existsSync()) {
-        _lastReadFileSize = file.lengthSync();
-      }
+  // 🆕 최근 N초를 캡처해서 파일로 저장
+  Future<Map<String, dynamic>> getCapture(int seconds) async {
+    if (!_isRecording) {
+      throw Exception('녹음이 진행 중이 아닙니다');
     }
-    
-    // Initialize circular buffer
-    _circularBuffer = CircularBuffer(300);
-    
-    _onStateChanged?.call();
-    if (kDebugMode) {
-      print('📸 캡처 시작 - Circular Buffer 활성화');
-    }
-  }
 
-  // Stop capture and save file
-  Future<Map<String, dynamic>> stopCapture() async {
-    if (!_isCapturing) return {};
+    if (_circularBuffer == null) {
+      throw Exception('CircularBuffer가 초기화되지 않았습니다');
+    }
 
     try {
-      _isCapturing = false;
-      
       // Generate output filename
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final recordingsDir = await _getAccessibleDirectory();
       final wavPath = path.join(recordingsDir.path, 'capture_$timestamp.wav');
 
-      // Save buffered audio data
-      await _saveCircularBufferAudio(wavPath);
-
+      // Read N seconds of audio data from circular buffer
+      final audioData = _circularBuffer!.readSeconds(seconds);
+      
+      if (audioData.isEmpty) {
+        throw Exception('버퍼에 오디오 데이터가 없습니다');
+      }
+      
+      // Create WAV file from audio data
+      await _createWavFile(audioData, wavPath);
+      
+      // 실제 저장된 시간 계산
+      final actualSeconds = audioData.length / (_circularBuffer!._sampleRate * _circularBuffer!._bytesPerSample);
+      
       final fileInfo = {
         'wavPath': wavPath,
         'timestamp': timestamp,
-        'captureStartTime': _captureStartTime,
-        'captureEndTime': DateTime.now().toIso8601String(),
-        'bufferDuration': _bufferDuration,
+        'captureTime': DateTime.now().toIso8601String(),
+        'requestedSeconds': seconds,
+        'actualSeconds': actualSeconds,
         'fileName': 'capture_$timestamp.wav',
         'fileSize': await File(wavPath).length(),
       };
 
-      _captureStartTime = null;
-      _onStateChanged?.call();
       if (kDebugMode) {
         print('💾 캡처 완료: $wavPath');
+        print('📊 요청: $seconds초 / 실제: ${actualSeconds.toStringAsFixed(1)}초');
       }
       
       return fileInfo;
@@ -295,6 +290,21 @@ class AudioService {
       }
       rethrow;
     }
+  }
+
+  // 🔄 기존 함수들 (하위 호환성 유지)
+  @Deprecated('Use getCapture(seconds) instead')
+  Future<void> startCapture() async {
+    // 이제는 아무 동작 안 함 (CircularBuffer가 항상 활성화되어 있으므로)
+    if (kDebugMode) {
+      print('⚠️ startCapture()는 더 이상 필요하지 않습니다. getCapture(N)을 사용하세요.');
+    }
+  }
+
+  @Deprecated('Use getCapture(seconds) instead')
+  Future<Map<String, dynamic>> stopCapture() async {
+    // getCapture()를 호출하도록 리다이렉트
+    return await getCapture(_bufferDuration);
   }
 
   // Get all saved files
@@ -319,7 +329,6 @@ class AudioService {
         }
       }
       
-      // Sort by timestamp (newest first)
       files.sort((a, b) => b['timestamp'].compareTo(a['timestamp']));
       return files;
     } catch (e) {
@@ -362,17 +371,13 @@ class AudioService {
     }
   }
 
-  // MP3 conversion removed - using WAV only for now
-
   // Start real-time audio streaming to circular buffer
   void _startRealTimeAudioStreaming() {
-    // Start collecting audio data immediately
     _startAudioDataCollection();
   }
 
   // Start collecting audio data from recorder
   void _startAudioDataCollection() {
-    // Use a timer to periodically collect audio data
     _recordingTimer = Timer.periodic(const Duration(milliseconds: 50), (timer) {
       _collectAudioData();
     });
@@ -380,10 +385,10 @@ class AudioService {
 
   // Collect audio data from recorder and write to circular buffer
   void _collectAudioData() {
+    // CircularBuffer가 없거나 녹음 중이 아니면 리턴
     if (!_isRecording || _circularBuffer == null) return;
     
     try {
-      // Read audio data from continuous recording file
       _readAudioFromContinuousFile();
     } catch (e) {
       if (kDebugMode) {
@@ -392,7 +397,7 @@ class AudioService {
     }
   }
 
-  // Read audio data from continuous recording file (temporary solution)
+  // Read audio data from continuous recording file
   void _readAudioFromContinuousFile() {
     if (_currentRecordingPath == null) return;
     
@@ -407,7 +412,7 @@ class AudioService {
       
       // 읽을 시작 위치 계산 (헤더 건너뛰기)
       final startPos = _lastReadFileSize == 0 
-          ? _wavHeaderSize  // 처음 읽을 때는 헤더 건너뛰기
+          ? _wavHeaderSize
           : _lastReadFileSize;
       
       // 새로운 데이터만 읽기
@@ -426,50 +431,14 @@ class AudioService {
     }
   }
 
-  // Save circular buffer audio data to file
-  Future<void> _saveCircularBufferAudio(String filePath) async {
-    if (_circularBuffer == null) {
-      // Fallback to continuous recording file if no buffer data
-      if (_currentRecordingPath != null && await File(_currentRecordingPath!).exists()) {
-        final sourceFile = File(_currentRecordingPath!);
-        await sourceFile.copy(filePath);
-        return;
-      } else {
-        throw Exception('저장할 오디오 데이터가 없습니다');
-      }
-    }
-    
-    // Read N seconds of audio data from circular buffer
-    final audioData = _circularBuffer!.readSeconds(_bufferDuration);
-    
-    // 데이터가 없을 때만 예외 처리
-    if (audioData.isEmpty) {
-      throw Exception('버퍼에 오디오 데이터가 없습니다');
-    }
-    
-    // Create WAV file from audio data
-    await _createWavFile(audioData, filePath);
-    
-    // 실제 저장된 시간 계산해서 로그 출력
-    final actualSeconds = audioData.length / (_circularBuffer!._sampleRate * _circularBuffer!._bytesPerSample);
-    if (kDebugMode) {
-      print('💾 Circular Buffer 저장 완료: ${audioData.length} bytes (${actualSeconds.toStringAsFixed(1)}초 / 요청: $_bufferDuration초)');
-    }
-  }
-
   // Create WAV file from audio data
   Future<void> _createWavFile(Uint8List audioData, String filePath) async {
-    // Create WAV header
     final wavHeader = _createWavHeader(audioData.length);
     
-    // Write file
     final file = File(filePath);
     final sink = file.openWrite();
     
-    // Write header
     sink.add(wavHeader);
-    
-    // Write audio data
     sink.add(audioData);
     
     await sink.close();
@@ -485,7 +454,7 @@ class AudioService {
     header.setUint8(1, 0x49); // 'I'
     header.setUint8(2, 0x46); // 'F'
     header.setUint8(3, 0x46); // 'F'
-    header.setUint32(4, 36 + dataSize, Endian.little); // File size - 8
+    header.setUint32(4, 36 + dataSize, Endian.little);
     
     // WAVE format
     header.setUint8(8, 0x57);  // 'W'
@@ -498,26 +467,25 @@ class AudioService {
     header.setUint8(13, 0x6D); // 'm'
     header.setUint8(14, 0x74); // 't'
     header.setUint8(15, 0x20); // ' '
-    header.setUint32(16, 16, Endian.little); // fmt chunk size
-    header.setUint16(20, 1, Endian.little);  // Audio format (PCM)
-    header.setUint16(22, 1, Endian.little);  // Number of channels
-    header.setUint32(24, sampleRate, Endian.little); // Sample rate
-    header.setUint32(28, sampleRate * 2, Endian.little); // Byte rate
-    header.setUint16(32, 2, Endian.little);  // Block align
-    header.setUint16(34, 16, Endian.little); // Bits per sample
+    header.setUint32(16, 16, Endian.little);
+    header.setUint16(20, 1, Endian.little);
+    header.setUint16(22, 1, Endian.little);
+    header.setUint32(24, sampleRate, Endian.little);
+    header.setUint32(28, sampleRate * 2, Endian.little);
+    header.setUint16(32, 2, Endian.little);
+    header.setUint16(34, 16, Endian.little);
     
     // data chunk
     header.setUint8(36, 0x64); // 'd'
     header.setUint8(37, 0x61); // 'a'
     header.setUint8(38, 0x74); // 't'
     header.setUint8(39, 0x61); // 'a'
-    header.setUint32(40, dataSize, Endian.little); // Data size
+    header.setUint32(40, dataSize, Endian.little);
     
     return header.buffer.asUint8List();
   }
 
-
-  // Set buffer duration
+  // Set buffer duration (default value for backward compatibility)
   void setBufferDuration(int duration) {
     if (duration >= 10 && duration <= 300) {
       _bufferDuration = duration;
@@ -529,6 +497,7 @@ class AudioService {
     return {
       'bufferDuration': _bufferDuration,
       'isRecording': _isRecording,
+      'circularBufferStatus': _circularBuffer?.getStatus(),
     };
   }
 

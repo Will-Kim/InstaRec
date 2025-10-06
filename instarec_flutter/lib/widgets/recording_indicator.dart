@@ -37,13 +37,6 @@ class RecordingIndicator extends StatelessWidget {
                   '버퍼 시간: ${recordingState.bufferDuration}초',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
-                if (recordingState.captureStartTime != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    '캡처 시작: ${_formatTime(recordingState.captureStartTime!)}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
               ],
             ),
           ),
@@ -52,12 +45,4 @@ class RecordingIndicator extends StatelessWidget {
     );
   }
 
-  String _formatTime(String isoString) {
-    try {
-      final dateTime = DateTime.parse(isoString);
-      return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}:${dateTime.second.toString().padLeft(2, '0')}';
-    } catch (e) {
-      return isoString;
-    }
-  }
 }

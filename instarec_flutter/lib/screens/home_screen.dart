@@ -48,11 +48,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           if (mounted) {
             final recordingState = Provider.of<RecordingState>(context, listen: false);
             recordingState.setIsRecording(_audioService!.isRecording);
-            if (_audioService!.isCapturing) {
-              recordingState.startCapture();
-            } else {
-              recordingState.stopCapture();
-            }
           }
         },
       );
@@ -60,33 +55,29 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       // Load saved settings
       await _loadSettings();
 
-      // Start continuous recording
-      await _audioService!.startContinuousRecording();
-
-      // Start initial capture (actual buffering)
-      await _audioService!.startCapture();
-
-      // Set initial capturing state
-      if (mounted) {
-        final recordingState = Provider.of<RecordingState>(context, listen: false);
-        recordingState.startCapture();
-      }
-
       // Start background service
       await BackgroundService.startService();
 
       // Set up volume button callbacks
       BackgroundService.setVolumeButtonCallbacks(
-        onVolumeUp: _toggleCapture,
-        onVolumeDown: _toggleCapture,
+        onVolumeUp: _saveCapture,
+        onVolumeDown: _saveCapture,
       );
+
+      // 앱 시작 시 자동으로 녹음 시작
+      await _startRecording();
 
       setState(() {
         _isInitialized = true;
       });
 
+      // 앱이 완전히 로딩된 후 시작 버튼 자동 실행
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _startRecording();
+      });
+
       if (kDebugMode) {
-        print('✅ InstaRec 앱 초기화 완료');
+        print('✅ InstaRec 앱 초기화 완료 - 자동 녹음 시작');
       }
     } catch (e) {
       if (kDebugMode) {
@@ -111,29 +102,68 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
 
-  Future<void> _toggleCapture() async {
+  // 시작 버튼 - 연속 녹음 시작
+  Future<void> _startRecording() async {
+    if (!_isInitialized || _audioService == null) return;
+
+    try {
+      await _audioService!.startContinuousRecording();
+      if (mounted) {
+        final recordingState = Provider.of<RecordingState>(context, listen: false);
+        recordingState.startRecording();
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ 녹음 시작 실패: $e');
+      }
+      _showErrorDialog('녹음 시작 실패', e.toString());
+    }
+  }
+
+  // 중지 버튼 - 녹음 중지 (저장 없이)
+  Future<void> _stopRecording() async {
+    if (!_isInitialized || _audioService == null) return;
+
+    try {
+      await _audioService!.stopContinuousRecording();
+      if (mounted) {
+        final recordingState = Provider.of<RecordingState>(context, listen: false);
+        recordingState.stopRecording();
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('❌ 녹음 중지 실패: $e');
+      }
+      _showErrorDialog('녹음 중지 실패', e.toString());
+    }
+  }
+
+  // 저장 버튼 - 최근 N초 저장
+  Future<void> _saveCapture() async {
     if (!_isInitialized || _audioService == null) return;
 
     final recordingState = Provider.of<RecordingState>(context, listen: false);
     
+    if (!recordingState.isRecording) {
+      _showErrorDialog('저장 실패', '녹음이 진행 중이 아닙니다.');
+      return;
+    }
+
     try {
-      if (recordingState.isCapturing) {
-        // Stop capture and save file
-        final fileInfo = await _audioService!.stopCapture();
-        if (fileInfo.isNotEmpty) {
-          recordingState.addSavedFile(fileInfo);
+      final result = await _audioService!.getCapture(recordingState.bufferDuration);
+      if (result.isNotEmpty) {
+        recordingState.addSavedFile(result);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('${recordingState.bufferDuration}초 오디오가 저장되었습니다')),
+          );
         }
-        recordingState.stopCapture();
-      } else {
-        // Start capture
-        await _audioService!.startCapture();
-        recordingState.startCapture();
       }
     } catch (e) {
       if (kDebugMode) {
-        print('❌ 캡처 토글 실패: $e');
+        print('❌ 저장 실패: $e');
       }
-      _showErrorDialog('캡처 실패', e.toString());
+      _showErrorDialog('저장 실패', e.toString());
     }
   }
 
@@ -165,21 +195,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('InstaRec'),
+        title: Consumer<RecordingState>(
+          builder: (context, recordingState, child) {
+            return Text('InstaRec - ${recordingState.recordingStatusText}');
+          },
+        ),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         actions: [
           Consumer<RecordingState>(
             builder: (context, recordingState, child) {
-              return IconButton(
-                icon: Icon(
-                  recordingState.isCapturing ? Icons.stop : Icons.fiber_manual_record,
-                  color: recordingState.statusColor,
-                ),
-                onPressed: _toggleCapture,
-                tooltip: recordingState.isCapturing ? '캡처 중지' : '캡처 시작',
+              return Icon(
+                recordingState.isRecording ? Icons.fiber_manual_record : Icons.stop,
+                color: recordingState.statusColor,
               );
             },
           ),
+          const SizedBox(width: 16),
         ],
       ),
       body: _isInitialized
@@ -196,28 +227,85 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   // Buffer settings
                   const BufferSettings(),
                   
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 32),
                   
-                  // Capture button
+                  // Save button (큰 버튼)
                   Consumer<RecordingState>(
                     builder: (context, recordingState, child) {
                       return ElevatedButton.icon(
-                        onPressed: _toggleCapture,
-                        icon: Icon(
-                          recordingState.isCapturing ? Icons.stop : Icons.fiber_manual_record,
-                          size: 32,
-                        ),
-                        label: Text(
-                          recordingState.isCapturing ? '캡처 중지' : '캡처 시작',
-                          style: const TextStyle(fontSize: 18),
+                        onPressed: recordingState.isRecording ? _saveCapture : null,
+                        icon: const Icon(Icons.save, size: 32),
+                        label: const Text(
+                          '저장',
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: recordingState.statusColor,
+                          backgroundColor: recordingState.isRecording ? Colors.blue : Colors.grey,
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 40),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                       );
                     },
+                  ),
+                  
+                  const SizedBox(height: 24),
+                  
+                  // Start/Stop buttons (나란히)
+                  Row(
+                    children: [
+                      // Start button
+                      Expanded(
+                        child: Consumer<RecordingState>(
+                          builder: (context, recordingState, child) {
+                            return ElevatedButton.icon(
+                              onPressed: recordingState.isRecording ? null : _startRecording,
+                              icon: const Icon(Icons.play_arrow, size: 24),
+                              label: const Text(
+                                '시작',
+                                style: TextStyle(fontSize: 16),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: recordingState.isRecording ? Colors.grey : Colors.green,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      
+                      const SizedBox(width: 16),
+                      
+                      // Stop button
+                      Expanded(
+                        child: Consumer<RecordingState>(
+                          builder: (context, recordingState, child) {
+                            return ElevatedButton.icon(
+                              onPressed: recordingState.isRecording ? _stopRecording : null,
+                              icon: const Icon(Icons.stop, size: 24),
+                              label: const Text(
+                                '중지',
+                                style: TextStyle(fontSize: 16),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: recordingState.isRecording ? Colors.red : Colors.grey,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                   
                   const SizedBox(height: 24),
