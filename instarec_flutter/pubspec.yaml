@@ -36,7 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   
   # Audio recording and playback
-  flutter_sound: ^9.2.13
+  record: ^5.1.2
   audioplayers: ^5.2.1
   
   # File system operations
@@ -118,5 +118,9 @@ flutter:
   #       - asset: fonts/TrajanPro_Bold.ttf
   #         weight: 700
   #
-  # For details regarding fonts from package dependencies,
-  # see https://flutter.dev/to/font-from-package
+# For details regarding fonts from package dependencies,
+# see https://flutter.dev/to/font-from-package
+
+dependency_overrides:
+  record_linux: ^1.0.0
+  record_platform_interface: ^1.2.0
