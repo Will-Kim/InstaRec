@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:open_file/open_file.dart';
 import '../models/recording_state.dart';
 import '../services/audio_service.dart';
 
@@ -12,34 +12,25 @@ class SavedFilesList extends StatefulWidget {
 }
 
 class _SavedFilesListState extends State<SavedFilesList> {
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  String? _currentlyPlaying;
   bool _isLoading = false;
-
-  @override
-  void dispose() {
-    _audioPlayer.dispose();
-    super.dispose();
-  }
 
   Future<void> _playFile(String filePath) async {
     try {
-      if (_currentlyPlaying == filePath) {
-        await _audioPlayer.stop();
-        setState(() {
-          _currentlyPlaying = null;
-        });
+      // 기본 오디오 앱으로 파일 열기
+      final result = await OpenFile.open(filePath);
+      
+      if (result.type == ResultType.done) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('기본 앱으로 재생을 시작합니다')),
+          );
+        }
       } else {
-        await _audioPlayer.stop();
-        
-        // iOS에서는 Documents 폴더 파일을 직접 재생할 수 없으므로 임시 폴더로 복사
-        final audioService = AudioService();
-        final playablePath = await audioService.copyToPlayableLocation(filePath);
-        
-        await _audioPlayer.play(DeviceFileSource(playablePath));
-        setState(() {
-          _currentlyPlaying = filePath;
-        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('파일 열기 실패: ${result.message}')),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -165,7 +156,6 @@ class _SavedFilesListState extends State<SavedFilesList> {
                           final fileName = file['fileName'] ?? file['wavPath']?.split('/').last ?? 'Unknown';
                           final timestamp = DateTime.fromMillisecondsSinceEpoch(file['timestamp']).toLocal();
                           final fileSize = file['fileSize'] ?? 0;
-                          final isPlaying = _currentlyPlaying == file['wavPath'];
                           
                           return Card(
                             margin: const EdgeInsets.only(bottom: 10),
@@ -200,9 +190,9 @@ class _SavedFilesListState extends State<SavedFilesList> {
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
                                           IconButton(
-                                            icon: Icon(isPlaying ? Icons.stop : Icons.play_arrow),
+                                            icon: const Icon(Icons.play_arrow),
                                             onPressed: () => _playFile(file['wavPath']),
-                                            tooltip: isPlaying ? '정지' : '재생',
+                                            tooltip: '재생',
                                           ),
                                           IconButton(
                                             icon: const Icon(Icons.share),
